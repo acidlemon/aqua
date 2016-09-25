@@ -13,6 +13,15 @@ func Setup(string) {
 
 }
 
+func Open(driver, path string) (DB, error) {
+	d, err := sql.Open(driver, path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &db{origin: d}, nil
+}
+
 type Executor interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	Prepare(query string) (*sql.Stmt, error)
@@ -31,10 +40,6 @@ type DB interface {
 	SetMaxOpenConns(n int)
 }
 
-type db struct {
-	origin *sql.DB
-}
-
 type Tx interface {
 	// sql.Tx
 	Executor
@@ -48,7 +53,7 @@ type Row interface {
 	Scan(dest ...interface{}) error
 
 	// aqua expantion
-	ScanObject(obj ...interface{}) error
+	//	ScanObject(obj ...interface{}) error
 }
 
 type Rows interface {
@@ -60,5 +65,5 @@ type Rows interface {
 	Scan(dest ...interface{}) error
 
 	// aqua expantion
-	ScanObject(obj ...interface{}) error
+	//	ScanObject(obj ...interface{}) error
 }
