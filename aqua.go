@@ -3,67 +3,78 @@ package aqua
 // import "gopkg.in/acidlemon/aqua.v0"
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 )
 
 //var db *sql.DB
 
-func Setup(string) {
-
-}
-
-func Open(driver, path string) (DB, error) {
-	d, err := sql.Open(driver, path)
-	if err != nil {
-		return nil, err
-	}
-
-	return &db{origin: d}, nil
-}
-
-type Executor interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
-	Prepare(query string) (*sql.Stmt, error)
-	Query(query string, args ...interface{}) (Rows, error)
-	QueryRow(query string, args ...interface{}) Row
-}
-
 type DB interface {
-	// sql.DB
-	Begin() (Tx, error)
+	Begin(ctx context.Context, opts *sql.TxOptions) (Tx, error)
 	Close() error
 	Driver() driver.Driver
-	Ping() error
-	Executor
+	Ping(ctx context.Context) error
 	SetMaxIdleConns(n int)
 	SetMaxOpenConns(n int)
+
+	Table(name string) StmtTable
 }
 
 type Tx interface {
-	// sql.Tx
-	Executor
 	Commit() error
 	Rollback() error
-	Stmt(stmt *sql.Stmt) *sql.Stmt
+
+	Table(name string) StmtTable
+}
+
+type StmtTable interface {
+	StmtCondition
+	Join(join string) StmtTable
+	Select(columns ...string) StmtTable
+
+	Create(ctx context.Context, values ...interface{}) error
+}
+
+type StmtCondition interface {
+	StmtAggregate
+
+	// Where系は検討の余地がたくさんあって悩んでいる
+	Where(condition string) StmtCondition
+	WhereEq(column string, value interface{}) StmtCondition
+	WhereIn(column string, values ...interface{}) StmtCondition
+	WhereBetween(column string, a, b interface{}) StmtCondition
+}
+
+type StmtAggregate interface {
+	StmtRunner
+
+	// こいつらは2回呼ぶと上書き、もしくはpanicさせたほうがいいか
+	GroupBy(columns ...string) StmtAggregate
+	OrderBy(columns ...string) StmtAggregate
+	Having(condition string) StmtAggregate
+	LimitOffset(limit, offset int) StmtAggregate
+}
+
+type StmtRunner interface {
+	All(ctx context.Context) (Rows, error)
+	Single(ctx context.Context) (Row, error)
+	FetchColumn(ctx context.Context, column string) (Rows, error)
+	Count(ctx context.Context) (int, error)
+
+	Update(ctx context.Context, v interface{}) error
+	Delete(ctx context.Context, v interface{}) error
 }
 
 type Row interface {
-	// sql.Row
-	Scan(dest ...interface{}) error
-
-	// aqua expantion
-	//	ScanObject(obj ...interface{}) error
+	Scan(dest interface{}) error
 }
 
 type Rows interface {
-	// sql.Rows
 	Close() error
 	Columns() ([]string, error)
 	Err() error
 	Next() bool
-	Scan(dest ...interface{}) error
 
-	// aqua expantion
-	//	ScanObject(obj ...interface{}) error
+	Scan(dest interface{}) error
 }
