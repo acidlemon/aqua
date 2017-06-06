@@ -6,15 +6,15 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/acidlemon/aqua"
 	"github.com/jinzhu/gorm"
 )
 
 type db struct {
-	d *gorm.DB
-
-	pluckColumn string
+	root    *gorm.DB
+	session *gorm.DB
 }
 
 func init() {
@@ -29,7 +29,7 @@ func Open(driver, path string) (aqua.DB, error) {
 
 	d.LogMode(true)
 
-	return &db{d: d}, nil
+	return &db{root: d}, nil
 }
 
 func (db *db) Begin(ctx context.Context, opts *sql.TxOptions) (aqua.Tx, error) {
@@ -37,27 +37,27 @@ func (db *db) Begin(ctx context.Context, opts *sql.TxOptions) (aqua.Tx, error) {
 }
 
 func (db *db) Close() error {
-	return db.d.Close()
+	return db.root.Close()
 }
 
 func (db *db) Driver() driver.Driver {
-	return db.d.DB().Driver()
+	return db.root.DB().Driver()
 }
 
 func (db *db) Ping(ctx context.Context) error {
-	return db.d.DB().PingContext(ctx)
+	return db.root.DB().PingContext(ctx)
 }
 
 func (db *db) SetMaxIdleConns(conn int) {
-	db.d.DB().SetMaxIdleConns(conn)
+	db.root.DB().SetMaxIdleConns(conn)
 }
 
 func (db *db) SetMaxOpenConns(conn int) {
-	db.d.DB().SetMaxOpenConns(conn)
+	db.root.DB().SetMaxOpenConns(conn)
 }
 
 func (db *db) Table(name string) aqua.StmtTable {
-	db.d = db.d.Table(name)
+	db.session = db.root.Table(name)
 	return db
 }
 
@@ -71,12 +71,23 @@ func (db *db) Delete(ctx context.Context, param interface{}) error {
 	return nil
 }
 
-func (db *db) Join(join string) aqua.StmtTable {
-	db.d = db.d.Joins(join)
+func (db *db) Join(table, condition string) aqua.StmtTable {
+	db.session = db.session.Joins(fmt.Sprintf("INNER JOIN %s ON %s", table, condition))
+	return db
+}
+
+func (db *db) LeftJoin(table, condition string) aqua.StmtTable {
+	db.session = db.session.Joins(fmt.Sprintf("LEFT JOIN %s ON %s", table, condition))
+	return db
+}
+
+func (db *db) RightJoin(table, condition string) aqua.StmtTable {
+	db.session = db.session.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s", table, condition))
 	return db
 }
 
 func (db *db) Select(columns ...string) aqua.StmtTable {
+	db.session = db.session.Select(strings.Join(columns, ", "))
 	return db
 }
 
@@ -85,11 +96,16 @@ func (db *db) Where(condition string) aqua.StmtCondition {
 }
 
 func (db *db) WhereEq(column string, value interface{}) aqua.StmtCondition {
+	if value == nil {
+		db.session = db.session.Where(fmt.Sprintf("%s IS NULL", column))
+	} else {
+		db.session = db.session.Where(fmt.Sprintf("%s = ?", column), value)
+	}
 	return db
 }
 
 func (db *db) WhereIn(column string, values ...interface{}) aqua.StmtCondition {
-	db.d = db.d.Where(fmt.Sprintf("%s in (?)", values))
+	db.session = db.session.Where(fmt.Sprintf("%s in (?)", column), values...)
 	return db
 }
 
@@ -98,13 +114,16 @@ func (db *db) WhereBetween(column string, a, b interface{}) aqua.StmtCondition {
 }
 
 func (db *db) All(ctx context.Context) (aqua.Rows, error) {
-	return nil, nil
+	rs := &rows{
+		db: db,
+	}
+	return rs, nil
 }
 
 func (db *db) Count(ctx context.Context) (int, error) {
 	var cnt int
-	db.d.Count(&cnt)
-	if errs := db.d.GetErrors(); len(errs) != 0 {
+	db.session.Count(&cnt)
+	if errs := db.session.GetErrors(); len(errs) != 0 {
 		return 0, errs[len(errs)-1]
 	}
 
@@ -112,24 +131,31 @@ func (db *db) Count(ctx context.Context) (int, error) {
 }
 
 func (db *db) FetchColumn(ctx context.Context, column string) (aqua.Rows, error) {
-	db.d = db.d.Select(column)
+	db.session = db.session.Select(column)
 
 	rs := &rows{
-		d:     db,
+		db:    db,
 		pluck: true,
 	}
 	return rs, nil
 }
 
 func (db *db) Single(ctx context.Context) (aqua.Row, error) {
-	return nil, nil
+	db.session = db.session.Limit(1)
+
+	r := &row{
+		db: db,
+	}
+	return r, nil
 }
 
-func (db *db) GroupBy(...string) aqua.StmtAggregate {
+func (db *db) GroupBy(groups ...string) aqua.StmtAggregate {
+	db.session = db.session.Group(strings.Join(groups, ","))
 	return db
 }
 
-func (db *db) OrderBy(...string) aqua.StmtAggregate {
+func (db *db) OrderBy(orders ...string) aqua.StmtAggregate {
+	db.session = db.session.Order(strings.Join(orders, ","))
 	return db
 }
 
@@ -142,18 +168,19 @@ func (db *db) LimitOffset(limit, offset int) aqua.StmtAggregate {
 }
 
 type rows struct {
-	d       *db
+	db      *db
 	pluck   bool
 	sqlRows *sql.Rows
 }
 
 func (r *rows) Scan(dest interface{}) error {
 	if !r.pluck {
-		r.d.d.Model(dest).Scan(dest)
+		r.db.session.Model(dest).Scan(dest)
 		return nil
 	}
 
-	sqlRows, err := r.d.d.Rows()
+	// copy from gorm scan
+	sqlRows, err := r.db.session.Rows()
 	if err != nil {
 		return err
 	}
@@ -175,7 +202,7 @@ func (r *rows) Scan(dest interface{}) error {
 
 func (r *rows) Close() error {
 	if r.sqlRows == nil {
-		sqlRows, err := r.d.d.Rows()
+		sqlRows, err := r.db.session.Rows()
 		if err != nil {
 			return err
 		}
@@ -188,7 +215,7 @@ func (r *rows) Close() error {
 
 func (r *rows) Columns() ([]string, error) {
 	if r.sqlRows == nil {
-		sqlRows, err := r.d.d.Rows()
+		sqlRows, err := r.db.session.Rows()
 		if err != nil {
 			return nil, err
 		}
@@ -200,7 +227,7 @@ func (r *rows) Columns() ([]string, error) {
 }
 func (r *rows) Err() error {
 	if r.sqlRows == nil {
-		sqlRows, err := r.d.d.Rows()
+		sqlRows, err := r.db.session.Rows()
 		if err != nil {
 			return err
 		}
@@ -212,7 +239,7 @@ func (r *rows) Err() error {
 }
 func (r *rows) Next() bool {
 	if r.sqlRows == nil {
-		sqlRows, err := r.d.d.Rows()
+		sqlRows, err := r.db.session.Rows()
 		if err != nil {
 			return false
 		}
@@ -221,4 +248,14 @@ func (r *rows) Next() bool {
 	}
 
 	return r.sqlRows.Next()
+}
+
+type row struct {
+	db *db
+}
+
+func (r *row) Scan(dest interface{}) error {
+	r.db.session.Model(dest).Scan(dest)
+
+	return nil
 }

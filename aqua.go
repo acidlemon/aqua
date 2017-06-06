@@ -30,7 +30,9 @@ type Tx interface {
 
 type StmtTable interface {
 	StmtCondition
-	Join(join string) StmtTable
+	Join(table, condition string) StmtTable
+	LeftJoin(table, condition string) StmtTable
+	RightJoin(table, condition string) StmtTable
 	Select(columns ...string) StmtTable
 
 	Create(ctx context.Context, values ...interface{}) error
