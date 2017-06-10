@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"os"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/acidlemon/aqua"
@@ -27,9 +29,24 @@ func Open(driver, path string) (aqua.DB, error) {
 		return nil, err
 	}
 
-	d.LogMode(true)
+	envval := os.Getenv("AQUA_DEBUG")
+	val, err := strconv.Atoi(envval)
+	if err == nil && val != 0 {
+		d.LogMode(true)
+	}
+
+	envval = os.Getenv("AQUA_GORM_DISABLE_AUTO_TIMESTAMP")
+	val, err = strconv.Atoi(envval)
+	if err == nil && val != 0 {
+		d.Callback().Create().Remove("gorm:update_time_stamp")
+		d.Callback().Update().Remove("gorm:update_time_stamp")
+	}
 
 	return &db{root: d}, nil
+}
+
+func (db *db) GetProvider() interface{} {
+	return db.root
 }
 
 func (db *db) Begin(ctx context.Context, opts *sql.TxOptions) (aqua.Tx, error) {
@@ -61,7 +78,15 @@ func (db *db) Table(name string) aqua.StmtTable {
 	return db
 }
 
+func (db *db) Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return db.root.CommonDB().Exec(query, args...)
+}
+
 func (db *db) Create(ctx context.Context, param ...interface{}) error {
+	// TODO waiting support bulk insert
+	for _, v := range param {
+		db.session = db.session.Create(v)
+	}
 	return nil
 }
 func (db *db) Update(ctx context.Context, param interface{}) error {
@@ -91,7 +116,19 @@ func (db *db) Select(columns ...string) aqua.StmtTable {
 	return db
 }
 
-func (db *db) Where(condition string) aqua.StmtCondition {
+func (db *db) Where(condition string, bind ...interface{}) aqua.StmtCondition {
+	if len(bind) == 1 {
+		t := reflect.TypeOf(bind[0])
+		//pp.Print(t)
+		if t.Kind() == reflect.Slice {
+			db.session = db.session.Where(condition, bind[0].([]interface{})...)
+		} else {
+			db.session = db.session.Where(condition, bind)
+		}
+	} else {
+		db.session = db.session.Where(condition, bind...)
+	}
+
 	return db
 }
 
@@ -105,11 +142,21 @@ func (db *db) WhereEq(column string, value interface{}) aqua.StmtCondition {
 }
 
 func (db *db) WhereIn(column string, values ...interface{}) aqua.StmtCondition {
-	db.session = db.session.Where(fmt.Sprintf("%s in (?)", column), values...)
+	if len(values) == 1 {
+		db.session = db.session.Where(fmt.Sprintf("%s in (?)", column), values...)
+	} else {
+		db.session = db.session.Where(fmt.Sprintf("%s in (?)", column), values)
+	}
 	return db
 }
 
 func (db *db) WhereBetween(column string, a, b interface{}) aqua.StmtCondition {
+	db.session = db.session.Where(fmt.Sprintf("%s between ? and ?", column), a, b)
+	return db
+}
+
+func (db *db) WhereLike(column, pattern string) aqua.StmtCondition {
+	db.session = db.session.Where(fmt.Sprintf("%s like ?", column), pattern)
 	return db
 }
 
@@ -165,97 +212,4 @@ func (db *db) Having(string) aqua.StmtAggregate {
 
 func (db *db) LimitOffset(limit, offset int) aqua.StmtAggregate {
 	return db
-}
-
-type rows struct {
-	db      *db
-	pluck   bool
-	sqlRows *sql.Rows
-}
-
-func (r *rows) Scan(dest interface{}) error {
-	if !r.pluck {
-		r.db.session.Model(dest).Scan(dest)
-		return nil
-	}
-
-	// copy from gorm scan
-	sqlRows, err := r.db.session.Rows()
-	if err != nil {
-		return err
-	}
-	defer sqlRows.Close()
-
-	container := reflect.Indirect(reflect.ValueOf(dest))
-	if container.Kind() != reflect.Slice {
-		return fmt.Errorf(`dest should be a slice, not %s`, container.Kind())
-	}
-
-	for sqlRows.Next() {
-		elem := reflect.New(container.Type().Elem()).Interface()
-		sqlRows.Scan(elem)
-		container.Set(reflect.Append(container, reflect.ValueOf(elem).Elem()))
-	}
-
-	return nil
-}
-
-func (r *rows) Close() error {
-	if r.sqlRows == nil {
-		sqlRows, err := r.db.session.Rows()
-		if err != nil {
-			return err
-		}
-
-		r.sqlRows = sqlRows
-	}
-
-	return r.sqlRows.Close()
-}
-
-func (r *rows) Columns() ([]string, error) {
-	if r.sqlRows == nil {
-		sqlRows, err := r.db.session.Rows()
-		if err != nil {
-			return nil, err
-		}
-
-		r.sqlRows = sqlRows
-	}
-
-	return r.sqlRows.Columns()
-}
-func (r *rows) Err() error {
-	if r.sqlRows == nil {
-		sqlRows, err := r.db.session.Rows()
-		if err != nil {
-			return err
-		}
-
-		r.sqlRows = sqlRows
-	}
-
-	return r.sqlRows.Err()
-}
-func (r *rows) Next() bool {
-	if r.sqlRows == nil {
-		sqlRows, err := r.db.session.Rows()
-		if err != nil {
-			return false
-		}
-
-		r.sqlRows = sqlRows
-	}
-
-	return r.sqlRows.Next()
-}
-
-type row struct {
-	db *db
-}
-
-func (r *row) Scan(dest interface{}) error {
-	r.db.session.Model(dest).Scan(dest)
-
-	return nil
 }

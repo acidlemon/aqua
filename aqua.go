@@ -8,8 +8,6 @@ import (
 	"database/sql/driver"
 )
 
-//var db *sql.DB
-
 type DB interface {
 	Begin(ctx context.Context, opts *sql.TxOptions) (Tx, error)
 	Close() error
@@ -19,6 +17,11 @@ type DB interface {
 	SetMaxOpenConns(n int)
 
 	Table(name string) StmtTable
+
+	Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+
+	// for customize original provider
+	GetProvider() interface{}
 }
 
 type Tx interface {
@@ -42,10 +45,11 @@ type StmtCondition interface {
 	StmtAggregate
 
 	// Where系は検討の余地がたくさんあって悩んでいる
-	Where(condition string) StmtCondition
+	Where(condition string, bind ...interface{}) StmtCondition
 	WhereEq(column string, value interface{}) StmtCondition
 	WhereIn(column string, values ...interface{}) StmtCondition
 	WhereBetween(column string, a, b interface{}) StmtCondition
+	WhereLike(column, pattern string) StmtCondition
 }
 
 type StmtAggregate interface {
