@@ -90,9 +90,23 @@ func (db *db) Create(ctx context.Context, param ...interface{}) error {
 	return nil
 }
 func (db *db) Update(ctx context.Context, param interface{}) error {
+	v := reflect.ValueOf(param)
+	if v.Kind() == reflect.Map {
+		db.session = db.session.Updates(param)
+	} else {
+		// TODO update using existing structパターンで
+		// SET id=? WHERE id=?なクエリがでて気持ち悪いのをどうにかしたい
+		db.session = db.session.Model(param).Update(param)
+	}
+
+	errs := db.session.GetErrors()
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 func (db *db) Delete(ctx context.Context, param interface{}) error {
+	db.session.Delete(param)
 	return nil
 }
 

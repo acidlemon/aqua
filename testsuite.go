@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	. "github.com/k0kubun/pp"
 )
 
 // test suite for provider
@@ -27,6 +29,8 @@ func (t *TestSuite) Run() {
 	t.testJoin()
 	t.testWhere()
 	t.testAggregation()
+	t.testUpdate()
+	t.testDelete()
 	t.testMisc()
 }
 
@@ -510,5 +514,92 @@ func (t *TestSuite) testWhere() {
 }
 
 func (t *TestSuite) testAggregation() {
+
+}
+
+func (t *TestSuite) fetchTestRow(ctx context.Context, id int) testRow {
+	var r testRow
+	row, err := t.db.Table("test").WhereEq("id", id).Single(ctx)
+	if err != nil {
+		t.Fatalf(`failed to get test row (id = %s): %s`, id, err)
+	}
+	err = row.Scan(&r)
+	if err != nil {
+		t.Fatalf(`failed to scan row: %s`, err)
+	}
+
+	return r
+
+}
+
+func (t *TestSuite) testUpdate() {
+	ctx := context.Background()
+
+	// update using existing struct
+	{
+		newData := "updated acidlemon-test"
+		r := t.fetchTestRow(ctx, 100)
+		r.Data = newData
+		err := t.db.Table("test").Update(ctx, &r)
+		if err != nil {
+			t.Fatalf(`failed to update row using struct: %s`, err)
+		}
+
+		r = t.fetchTestRow(ctx, 100)
+		if r.Data != newData {
+			t.Errorf(`Data did not update correctly, actual: %s`, r.Data)
+		}
+	}
+
+	// update using new struct
+	{
+		newData := "new-struct acidlemon-test"
+		r := testRow{
+			Data: newData,
+		}
+		err := t.db.Table("test").WhereEq("id", 100).Update(ctx, &r)
+		if err != nil {
+			t.Fatalf(`failed to update row using struct: %s`, err)
+		}
+
+		r = t.fetchTestRow(ctx, 100)
+		if r.Data != newData {
+			t.Errorf(`Data did not update correctly, actual: %s`, r.Data)
+		}
+	}
+
+	// update using map
+	{
+		newData := "map acidlemon-test"
+		m := map[string]interface{}{
+			"data": newData,
+		}
+		err := t.db.Table("test").WhereEq("id", 100).Update(ctx, m)
+		if err != nil {
+			t.Fatalf(`failed to update row using struct: %s`, err)
+		}
+
+		r := t.fetchTestRow(ctx, 100)
+		if r.Data != newData {
+			t.Errorf(`Data did not update correctly, actual: %s`, r.Data)
+		}
+	}
+
+}
+
+func (t *TestSuite) testDelete() {
+	ctx := context.Background()
+
+	r := t.fetchTestRow(ctx, 100)
+	// delete
+	err := t.db.Table("test").Delete(ctx, &r)
+	if err != nil {
+		t.Fatalf(`failed to delete row: %s`, err)
+	}
+
+	r = t.fetchTestRow(ctx, 100)
+	if r.ID == 100 {
+		t.Errorf(`row exists, expected result is no row`)
+	}
 
 }
