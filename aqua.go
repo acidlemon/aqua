@@ -16,9 +16,7 @@ type DB interface {
 	SetMaxIdleConns(n int)
 	SetMaxOpenConns(n int)
 
-	Table(name string) StmtTable
-
-	Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryRunner
 
 	// for customize original provider
 	GetProvider() interface{}
@@ -28,7 +26,12 @@ type Tx interface {
 	Commit() error
 	Rollback() error
 
+	QueryRunner
+}
+
+type QueryRunner interface {
 	Table(name string) StmtTable
+	Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
 type StmtTable interface {
@@ -73,7 +76,8 @@ type StmtRunner interface {
 }
 
 type Row interface {
-	Scan(dest interface{}) error
+	ScanRow(dest interface{}) error
+	Scan(dest ...interface{}) error
 }
 
 type Rows interface {
@@ -82,5 +86,6 @@ type Rows interface {
 	Err() error
 	Next() bool
 
-	Scan(dest interface{}) error
+	Scan(dest ...interface{}) error // sql.Rows 's Scan()
+	ScanAll(dest interface{}) error
 }

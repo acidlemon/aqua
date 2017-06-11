@@ -12,7 +12,19 @@ type rows struct {
 	sqlRows *sql.Rows
 }
 
-func (r *rows) Scan(dest interface{}) error {
+func (r *rows) Scan(dest ...interface{}) error {
+	if r.sqlRows == nil {
+		sqlRows, err := r.db.session.Rows()
+		if err != nil {
+			return err
+		}
+		r.sqlRows = sqlRows
+	}
+
+	return r.sqlRows.Scan(dest...)
+}
+
+func (r *rows) ScanAll(dest interface{}) error {
 	if !r.pluck {
 		r.db.session.Model(dest).Scan(dest)
 		return nil

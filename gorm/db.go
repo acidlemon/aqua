@@ -49,8 +49,30 @@ func (db *db) GetProvider() interface{} {
 	return db.root
 }
 
-func (db *db) Begin(ctx context.Context, opts *sql.TxOptions) (aqua.Tx, error) {
-	return aqua.Tx(nil), nil
+func (_db *db) Begin(ctx context.Context, opts *sql.TxOptions) (aqua.Tx, error) {
+	tx := _db.root.Begin()
+	result := &db{
+		root: tx,
+	}
+
+	return result, nil
+}
+
+func (db *db) Commit() error {
+	db.root.Commit()
+	errs := db.root.GetErrors()
+	if len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
+}
+func (db *db) Rollback() error {
+	db.root.Rollback()
+	errs := db.root.GetErrors()
+	if len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
 }
 
 func (db *db) Close() error {
@@ -205,7 +227,7 @@ func (db *db) Single(ctx context.Context) (aqua.Row, error) {
 	db.session = db.session.Limit(1)
 
 	r := &row{
-		db: db,
+		session: db.session,
 	}
 	return r, nil
 }
