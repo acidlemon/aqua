@@ -35,9 +35,11 @@ func Open(driver, path string) (aqua.DB, error) {
 		d.LogMode(true)
 	}
 
-	envval = os.Getenv("AQUA_GORM_DISABLE_AUTO_TIMESTAMP")
+	envval = os.Getenv("AQUA_GORM_ENABLE_AUTO_TIMESTAMP")
 	val, err = strconv.Atoi(envval)
 	if err == nil && val != 0 {
+
+	} else {
 		d.Callback().Create().Remove("gorm:update_time_stamp")
 		d.Callback().Update().Remove("gorm:update_time_stamp")
 	}
